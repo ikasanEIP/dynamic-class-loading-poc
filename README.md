@@ -1,6 +1,41 @@
 # Dynamic Class Loading with Spring Bean Integration
 
-A comprehensive Java library for dynamically loading classes from Maven artifacts at runtime and seamlessly integrating them as Spring beans with full property binding support.
+A comprehensive Java library for dynamically loading classes from Maven artifacts at runtime and seamlessly integrating them as Spring beans with full property binding support. Includes a **production-ready integration with Ikasan EIP** demonstrating dynamic loading of BigQueue consumer/producer components into enterprise integration flows.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+  - [MavenArtifactClassLoader](#1-mavenartifactclassloader)
+  - [DynamicBeanLoader](#2-dynamicbeanloader)
+  - [SpringBootDynamicBeanLoader](#3-springbootdynamicbeanloader)
+- [Quick Start](#quick-start)
+  - [Basic Maven Artifact Loading](#basic-maven-artifact-loading)
+  - [Spring Bean Registration](#spring-bean-registration)
+  - [Property Binding from application.properties](#property-binding-from-applicationproperties)
+- [Comprehensive Test Suite](#comprehensive-test-suite)
+  - [MavenArtifactClassLoader Tests](#mavenartifactclassloader-tests-7-tests)
+  - [DynamicBeanLoader Tests](#dynamicbeanloader-tests-7-tests)
+  - [SpringBootDynamicBeanLoader Tests](#springbootdynamicbeanloader-tests-3-tests)
+- [Real-World Example: Ikasan Integration Platform](#real-world-example-ikasan-integration-platform)
+  - [Architecture Overview](#architecture-overview)
+  - [Components Dynamically Loaded](#components-dynamically-loaded)
+  - [FlowFactory Integration](#flowfactory-integration)
+  - [Solving the ClassLoader Visibility Challenge](#solving-the-classloader-visibility-challenge)
+  - [ModuleFactoryTest Demonstration](#modulefactorytest-demonstration)
+  - [Key Benefits of This Approach](#key-benefits-of-this-approach)
+  - [Running the Ikasan Integration Test](#running-the-ikasan-integration-test)
+- [Use Cases](#use-cases)
+- [Advanced Topics](#advanced-topics)
+  - [Custom Repositories](#custom-repositories)
+  - [ClassLoader Isolation](#classloader-isolation)
+  - [Bean Lifecycle Hooks](#bean-lifecycle-hooks)
+- [Dependencies](#dependencies)
+- [Running Tests](#running-tests)
+- [Best Practices](#best-practices)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Overview
 
@@ -10,6 +45,7 @@ This project provides a powerful solution for runtime plugin architectures, allo
 - **Register classes as Spring beans** at runtime
 - **Bind properties** from `application.properties` or other sources
 - **Manage full bean lifecycle** through Spring's IoC container
+- **Integrate with enterprise frameworks** like Ikasan EIP using the FlowFactory paradigm
 
 ## Key Features
 
@@ -29,6 +65,13 @@ This project provides a powerful solution for runtime plugin architectures, allo
 - Properties file support
 - Spring Environment integration
 - Automatic type conversion (String, boolean, int, Integer, etc.)
+
+### 🏭 Enterprise Integration (Ikasan EIP)
+- Production-ready integration with Ikasan Enterprise Integration Platform
+- Dynamic loading of BigQueue consumer and producer components
+- FlowFactory paradigm for building integration flows
+- Complete working example in `ModuleFactoryTest`
+- Solves classloader visibility challenges for Spring AOP
 
 ## Architecture
 
@@ -665,6 +708,283 @@ loader.loadRegisterAndBindProperties(
     "component.config"
 );
 ```
+
+## Real-World Example: Ikasan Integration Platform
+
+This project demonstrates a production-ready integration with **Ikasan EIP (Enterprise Integration Platform)**, dynamically loading BigQueue consumer and producer components and wiring them into an Ikasan flow using the FlowFactory paradigm.
+
+### Architecture Overview
+
+The integration demonstrates:
+1. **Dynamic Component Loading** - BigQueue components loaded from Maven at runtime
+2. **Spring Bean Registration** - Components registered as Spring beans without static configuration
+3. **FlowFactory Integration** - Dynamically loaded components wired into Ikasan flows
+4. **ClassLoader Isolation** - Custom classloader for runtime component visibility
+
+### Components Dynamically Loaded
+
+#### 1. BigQueueConsumer
+**Maven Coordinates:** `org.ikasan:ikasan-big-queue:5.0.0`
+
+```java
+// Dynamically load BigQueue and ikasan-big-queue artifacts
+classLoader.loadArtifact("org.ikasan:bigqueue:1.0.0");
+classLoader.loadArtifact("org.ikasan:ikasan-big-queue:5.0.0");
+
+// Load BigQueueConsumer class
+Class<?> bigQueueConsumerClass = classLoader.loadClass(
+    "org.ikasan.component.endpoint.bigqueue.consumer.BigQueueConsumer"
+);
+
+// Create supporting components
+Class<?> bigQueueClass = classLoader.loadClass("org.ikasan.bigqueue.BigQueueImpl");
+Class<?> inboundQueueMessageRunnerClass = classLoader.loadClass(
+    "org.ikasan.component.endpoint.bigqueue.consumer.InboundQueueMessageRunner"
+);
+Class<?> serialiserClass = classLoader.loadClass(
+    "org.ikasan.component.endpoint.bigqueue.serialiser.BigQueueMessageJsonSerialiser"
+);
+
+// Create IBigQueue instance
+String queueDir = System.getProperty("java.io.tmpdir") + "/bigqueue-test";
+Object bigQueue = bigQueueClass.getConstructor(String.class, String.class)
+    .newInstance(queueDir, "test-queue");
+
+// Create serialiser
+Object serialiser = serialiserClass.getConstructor().newInstance();
+
+// Create InboundQueueMessageRunner with bigQueue and serialiser
+Object inboundQueueMessageRunner = inboundQueueMessageRunnerClass
+    .getConstructor(
+        classLoader.loadClass("org.ikasan.bigqueue.IBigQueue"),
+        classLoader.loadClass("org.ikasan.spec.serialiser.Serialiser")
+    )
+    .newInstance(bigQueue, serialiser);
+
+// Get TransactionManager from Spring context
+jakarta.transaction.TransactionManager transactionManager =
+    applicationContext.getBean(jakarta.transaction.TransactionManager.class);
+
+// Create BigQueueConsumer with all dependencies
+Object bigQueueConsumer = bigQueueConsumerClass
+    .getConstructor(
+        classLoader.loadClass("org.ikasan.bigqueue.IBigQueue"),
+        classLoader.loadClass("org.ikasan.component.endpoint.bigqueue.consumer.InboundQueueMessageRunner"),
+        jakarta.transaction.TransactionManager.class
+    )
+    .newInstance(bigQueue, inboundQueueMessageRunner, transactionManager);
+
+// Register as Spring bean
+SpringBeanRegistry.registerBeanInstance(applicationContext, "bigQueueConsumer", bigQueueConsumer);
+```
+
+**Key Points:**
+- BigQueueConsumer reads from an inbound BigQueue
+- Requires IBigQueue, InboundQueueMessageRunner, and TransactionManager
+- InboundQueueMessageRunner handles message deserialization
+- All dependencies constructed via reflection
+
+#### 2. BigQueueProducer
+**Maven Coordinates:** `org.ikasan:ikasan-big-queue:5.0.0`
+
+```java
+// Load BigQueueProducer class (from same artifact as consumer)
+Class<?> bigQueueProducerClass = classLoader.loadClass(
+    "org.ikasan.component.endpoint.bigqueue.producer.BigQueueProducer"
+);
+
+// Create outbound BigQueue instance
+String outboundQueueDir = System.getProperty("java.io.tmpdir") + "/bigqueue-outbound";
+Object outboundBigQueue = bigQueueClass.getConstructor(String.class, String.class)
+    .newInstance(outboundQueueDir, "outbound-queue");
+
+// Create BigQueueProducer with outbound queue
+Object bigQueueProducer = bigQueueProducerClass
+    .getConstructor(classLoader.loadClass("org.ikasan.bigqueue.IBigQueue"))
+    .newInstance(outboundBigQueue);
+
+// Register as Spring bean
+SpringBeanRegistry.registerBeanInstance(applicationContext, "bigQueueProducer", bigQueueProducer);
+```
+
+**Key Points:**
+- BigQueueProducer writes to an outbound BigQueue
+- Simpler constructor - only requires IBigQueue
+- Uses BigQueueMessageJsonSerialiser by default
+
+### FlowFactory Integration
+
+The dynamically loaded components are wired into Ikasan flows using the **FlowFactory paradigm**, which allows for dynamic flow creation at runtime:
+
+```java
+@Configuration
+public class TestModuleConfiguration implements FlowFactory {
+
+    @Autowired
+    private ApplicationContext applicationContext;
+
+    @Autowired
+    private BuilderFactory builderFactory;
+
+    @Autowired
+    private ConfiguredModuleConfiguration configuredModuleConfiguration;
+
+    // FlowFactory interface implementation - creates flows dynamically
+    @Override
+    public List<Flow> create(String flowName, String profile) {
+        return List.of(createFlow(flowName));
+    }
+
+    private Flow createFlow(String name) {
+        // Build flow using dynamically loaded consumer and producer
+        return builderFactory.getFlowBuilder("test-module", name)
+                .consumer("bigQueueConsumer", (Consumer) applicationContext.getBean("bigQueueConsumer"))
+                .producer("bigQueueProducer", (Producer) applicationContext.getBean("bigQueueProducer"))
+                .build();
+    }
+
+    @Bean
+    public Module<Flow> testModule() {
+        // Module configured with FlowFactory for dynamic flow creation
+        return builderFactory.getModuleBuilder("test-module")
+                .setConfiguration(this.configuredModuleConfiguration)
+                .withFlowFactory(this)  // FlowFactory enables runtime flow creation
+                .build();
+    }
+}
+```
+
+**FlowFactory Benefits:**
+- **Dynamic Flow Creation** - Flows created on-demand by calling `create(flowName, profile)`
+- **Multiple Flow Support** - Single factory can create multiple flows (test-flow1, test-flow2, etc.)
+- **Runtime Flexibility** - Flow structure determined at runtime based on flowName parameter
+- **Configuration Integration** - Works with Ikasan's ConfiguredModuleConfiguration
+
+**Flow Diagram:**
+```
+┌─────────────────────┐      ┌─────────────────────┐
+│  BigQueueConsumer   │─────▶│  BigQueueProducer   │
+│  (dynamically       │      │  (dynamically       │
+│   loaded)           │      │   loaded)           │
+└─────────────────────┘      └─────────────────────┘
+        │                             │
+        ▼                             ▼
+   Inbound Queue              Outbound Queue
+   (/tmp/bigqueue-test)      (/tmp/bigqueue-outbound)
+```
+
+### Solving the ClassLoader Visibility Challenge
+
+**Problem:** When Spring AOP tries to create proxies for dynamically loaded components, it encounters `IllegalArgumentException` because interfaces like `NullPayloadCallback` are not visible from the app classloader.
+
+**Solution:** Set the thread context classloader to the custom `MavenArtifactClassLoader` and keep it set throughout the application lifecycle:
+
+```java
+@PostConstruct
+public void initializeDynamicBeans() throws Exception {
+    MavenArtifactClassLoader classLoader = new MavenArtifactClassLoader();
+
+    // Load artifacts
+    classLoader.loadArtifact("org.ikasan:bigqueue:1.0.0");
+    classLoader.loadArtifact("org.ikasan:ikasan-big-queue:5.0.0");
+
+    // Set as thread context classloader - CRITICAL for AOP proxy creation
+    Thread.currentThread().setContextClassLoader(classLoader);
+
+    // Create and register beans...
+    // DO NOT restore original classloader - keep it set permanently
+}
+```
+
+**Why This Works:**
+- Spring AOP uses the thread context classloader to load classes for proxy creation
+- Setting it to our custom classloader makes all dynamically loaded classes visible
+- Keeping it set ensures visibility throughout the bean lifecycle
+- Enables Spring to create JDK dynamic proxies for interfaces defined in dynamically loaded JARs
+
+### ModuleFactoryTest Demonstration
+
+The `ModuleFactoryTest` demonstrates the complete integration by testing flow lifecycle management:
+
+```java
+@SpringBootTest
+@ContextConfiguration(classes = {TestModuleConfiguration.class, TestConfiguration.class})
+@ActiveProfiles("test")
+public class ModuleFactoryTest {
+
+    @Autowired
+    private Module<Flow> moduleUnderTest;
+
+    public IkasanFlowTestRule flowTestRule = new IkasanFlowTestRule();
+
+    @Test
+    void testModuleFactoryIsAvailable() {
+        // Test flow1 - dynamically created via FlowFactory
+        Flow flow = moduleUnderTest.getFlow("test-flow1");
+        flow.start();
+        assertEquals(Flow.RUNNING, flow.getState());
+
+        flow.stop();
+        assertEquals(Flow.STOPPED, flow.getState());
+
+        // Test flow2 - also dynamically created via FlowFactory
+        flow = moduleUnderTest.getFlow("test-flow2");
+        flow.start();
+        assertEquals(Flow.RUNNING, flow.getState());
+
+        flow.stop();
+        assertEquals(Flow.STOPPED, flow.getState());
+    }
+}
+```
+
+**Test Highlights:**
+- **Multiple Dynamic Flows** - Creates test-flow1 and test-flow2 on-demand via FlowFactory
+- **Flow Lifecycle Testing** - Tests start/stop transitions for each flow
+- **State Verification** - Validates flows reach RUNNING and STOPPED states correctly
+- **Runtime Flow Creation** - Flows don't exist until `getFlow()` is called, triggering FlowFactory
+
+**Test Configuration:**
+- `TestModuleConfiguration` - Implements FlowFactory for dynamic flow creation
+- `TestConfiguration` - Dynamically loads and registers BigQueue components via `@PostConstruct`
+- `@SpringBootTest` - Full Spring Boot context with Ikasan autoconfiguration
+- `application-test.properties` - Datasource and Ikasan configuration
+- `h2-datasource-conf.xml` - H2 database bean definitions for testing
+
+### Key Benefits of This Approach
+
+1. **Zero Static Configuration** - No XML or annotation scanning required for BigQueue components
+2. **Version Flexibility** - Can load different component versions dynamically
+3. **Runtime Plugin Architecture** - Add/remove components without recompilation
+4. **Spring Integration** - Full Spring bean lifecycle and AOP support
+5. **FlowFactory Paradigm** - Seamless integration with Ikasan's fluent flow builder API
+6. **Production Ready** - Demonstrated with real Ikasan EIP components
+
+### Running the Ikasan Integration Test
+
+```bash
+# Set Java home to JDK 26
+export JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-26.0.1.jdk/Contents/Home
+
+# Run the ModuleFactoryTest
+mvn test -Dtest=ModuleFactoryTest
+```
+
+**Expected Output:**
+- Ikasan Spring Boot context starts successfully
+- BigQueueConsumer and BigQueueProducer beans registered dynamically
+- Module "test-module" initialized with FlowFactory
+- Flow "test-flow1" created dynamically, started, and stopped successfully
+- Flow "test-flow2" created dynamically, started, and stopped successfully
+- Console output shows:
+  ```
+  test-flow1 started!
+  test-flow1 stopped!
+  test-flow2 started!
+  test-flow2 stopped!
+  ```
+- All state assertions pass
+- Test passes ✓
 
 ## Advanced Topics
 

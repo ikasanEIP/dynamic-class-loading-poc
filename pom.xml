@@ -22,6 +22,12 @@
             <version>5.0.0</version>
         </dependency>
 
+        <dependency>
+            <groupId>org.ikasan</groupId>
+            <artifactId>ikasan-h2-standalone-persistence</artifactId>
+            <version>5.0.0</version>
+        </dependency>
+
         <!-- Maven Resolver for artifact resolution -->
         <dependency>
             <groupId>org.apache.maven.resolver</groupId>
@@ -62,7 +68,38 @@
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
-            <version>5.10.1</version>
+            <version>5.11.4</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Spring Boot Test -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-test</artifactId>
+            <version>4.1.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-test</artifactId>
+            <version>6.2.4</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- H2 Database for testing -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.ikasan</groupId>
+            <artifactId>ikasan-test</artifactId>
+            <version>5.0.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

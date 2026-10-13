@@ -1,6 +1,7 @@
 package org.ikasan.dynamic.cl;
 
 import org.springframework.beans.factory.config.BeanDefinition;
+import org.springframework.beans.factory.support.AbstractBeanDefinition;
 import org.springframework.beans.factory.support.BeanDefinitionBuilder;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.context.ApplicationContext;
@@ -56,7 +57,7 @@ public class SpringBeanRegistry {
      * @param constructorArgs the constructor arguments
      * @return the registered bean instance
      */
-    public static Object registerBeanWithArgs(ApplicationContext applicationContext, String beanName, 
+    public static Object registerBeanWithArgs(ApplicationContext applicationContext, String beanName,
                                               Class<?> beanClass, Object... constructorArgs) {
         ConfigurableApplicationContext configurableContext = (ConfigurableApplicationContext) applicationContext;
         BeanDefinitionRegistry registry = (BeanDefinitionRegistry) configurableContext.getBeanFactory();
@@ -66,7 +67,13 @@ public class SpringBeanRegistry {
         for (Object arg : constructorArgs) {
             beanDefinitionBuilder.addConstructorArgValue(arg);
         }
-        BeanDefinition beanDefinition = beanDefinitionBuilder.getBeanDefinition();
+
+        AbstractBeanDefinition beanDefinition = beanDefinitionBuilder.getBeanDefinition();
+
+        // Disable autowire candidate and synthetic to avoid AOP proxying issues
+        // with dynamically loaded classes
+        beanDefinition.setAutowireCandidate(false);
+        beanDefinition.setSynthetic(true);
 
         // Register the bean
         registry.registerBeanDefinition(beanName, beanDefinition);
